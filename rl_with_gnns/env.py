@@ -5,6 +5,7 @@ from torch_geometric.utils import to_dense_adj
 import torch as th
 import networkx as nx
 from gymnasium import Wrapper
+from typing import List
 
 
 class VariableTimeLimit(Wrapper):
@@ -322,3 +323,158 @@ class MVCEnv(gym.Env):
             if self.covered_edges[u, v] == 0:
                 return False
         return True
+
+class MISEnv(gym.Env):
+    def __init__(self, split: str, seed: int):
+        if split not in ["train", "val", "test"]:
+            raise ValueError("split must be one of 'train', 'val', or 'test")
+        
+        super(MISEnv, self).__init__()
+
+        self.split = split
+        self.graph_rng = np.random.default_rng(seed)
+
+        if split == "train":
+            self.num_graphs = 10000
+            self.graph_sizes = [5, 10, 15]
+        elif split == "val":
+            self.num_graphs = 20
+            self.graph_sizes = [15]
+        else:
+            self.num_graphs = 100
+            self.graph_sizes = [20]
+        
+        self.max_nodes = max(self.graph_sizes)
+        self.graphs = self._generate_graph_set()
+        self.current_graph_index = 0
+
+        self.action_space = gym.spaces.Discrete(self.max_nodes)
+        self.observation_space = gym.spaces.Dict(
+            {
+                # node features: is node in mis, is node in neighbourhood of partial mis
+                "node_features": gym.spaces.Box(
+                    low=0,
+                    high=1,
+                    shape=(self.max_nodes, 2),
+                    dtype=np.float32,
+                ),
+                # edge features: ? 
+                "edge_features": gym.spaces.Box(
+                    low=0,
+                    high=1,
+                    shape=(self.max_nodes, self.max_nodes, 1),
+                    dtype=np.float32,
+                ),
+                "adjacency_matrix": gym.spaces.Box(
+                    low=0,
+                    high=1,
+                    shape=(self.max_nodes, self.max_nodes),
+                    dtype=np.float32,
+                ),
+            }
+        )
+
+
+    def reset(self, seed=None, options=None):
+        self.graph = self.graphs[self.current_graph_index]
+        self.current_graph_index += 1
+        if self.current_graph_index >= len(self.graphs):
+            self.current_graph_index = 0
+            self.graph_rng.shuffle(self.graphs)
+
+        self.in_mis = np.zeros(self.max_nodes, dtype=np.float32)
+
+        # 1 if node is unavailable for selection
+        # either it is already selected or is adjacent to a selected node
+        self.mis_neighbourhood = np.zeros(
+            (self.max_nodes), dtype=np.float32
+        )
+
+        return self._get_observation(), {}
+
+    def step(self, action):
+
+        # penalty for re-adding a node or for adding a forbidden node
+        if self.in_mis[action] == 1 or self.mis_neighbourhood[action] == 1:
+            reward = -1.0
+            return self._get_observation(), reward, False, False, {}
+        
+        self.in_mis[action] = 1 # add node to independent set
+        self.mis_neighbourhood[action] = 1 # selected node is in its own neighbourhood
+        reward = 0.0 # no immediate reward
+
+        # forbid all neighbours of selected node
+        neighbours = self.graph.edge_index[1][self.graph.edge_index[0] == action]
+        for neighbour in neighbours.numpy():
+            self.mis_neighbourhood[neighbour] = 1
+        
+        done = self._all_nodes_in_neighbourhood()
+
+        if done:
+            reward = self._compute_mis_size()
+
+        return self._get_observation(), reward, done, False, {}
+
+    def action_masks(self):
+        return (
+            (self.in_mis == 0)
+            & (self.mis_neighbourhood == 0)
+            & (np.arange(self.max_nodes) < self.graph.num_nodes)
+        )
+
+    def _sample_graph(self) -> Data:
+        size = self.graph_rng.choice(self.graph_sizes)
+        adj = nx.watts_strogatz_graph(n=size, k=4, p=0.3, seed=self.graph_rng)
+        edges = nx.to_numpy_array(adj)
+        np.fill_diagonal(edges, 0)
+        edge_index = np.array(np.nonzero(edges))
+
+        return Data(
+            edge_index=th.tensor(edge_index),
+            num_nodes=size,
+        )
+
+    def _generate_graph_set(self) -> List[Data]:
+        graphs = []
+        for _ in range(self.num_graphs):
+            graphs.append(self._sample_graph())
+        return graphs
+    
+
+    def _all_nodes_in_neighbourhood(self) -> bool:
+        return np.all(self.mis_neighbourhood[: self.graph.num_nodes] == 1)
+        # return (self.mis_neighbourhood.sum() == self.graph.num_nodes)
+    
+    def _get_observation(self):
+        node_features = np.zeros((self.max_nodes, 2), dtype=np.float32)
+        node_features[: self.graph.num_nodes, 0] = self.in_mis[: self.graph.num_nodes]
+        node_features[: self.graph.num_nodes, 1] = self.mis_neighbourhood[: self.graph.num_nodes]
+
+        edge_features = np.zeros((self.max_nodes, self.max_nodes, 1), dtype=np.float32)
+
+        edge_index = self.graph.edge_index.numpy()
+        for i in range(edge_index.shape[1]):
+            u = edge_index[0, i]
+            v = edge_index[1, i]
+            if (
+                self.in_mis[u] == 1
+                or self.in_mis[v] == 1
+                or self.mis_neighbourhood[u] == 1
+                or self.mis_neighbourhood[v] == 1
+            ):
+                edge_features[u, v, 0] = 1.0
+                edge_features[v, u, 0] = 1.0
+
+        adjacency_matrix = (
+            to_dense_adj(self.graph.edge_index, max_num_nodes=self.max_nodes)
+            .squeeze(0)
+            .numpy()
+        )
+
+        return {
+            "node_features": node_features,
+            "edge_features": edge_features,
+            "adjacency_matrix": adjacency_matrix,
+        }
+    def _compute_mis_size(self):
+        return self.in_mis[: self.graph.num_nodes].sum()
