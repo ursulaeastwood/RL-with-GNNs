@@ -351,11 +351,11 @@ class MISEnv(gym.Env):
         self.action_space = gym.spaces.Discrete(self.max_nodes)
         self.observation_space = gym.spaces.Dict(
             {
-                # node features: is node in mis, is node in neighbourhood of partial mis
+                # node features: is node in mis
                 "node_features": gym.spaces.Box(
                     low=0,
                     high=1,
-                    shape=(self.max_nodes, 2),
+                    shape=(self.max_nodes, 1),
                     dtype=np.float32,
                 ),
                 "adjacency_matrix": gym.spaces.Box(
@@ -439,9 +439,8 @@ class MISEnv(gym.Env):
         # return (self.mis_neighbourhood.sum() == self.graph.num_nodes)
     
     def _get_observation(self):
-        node_features = np.zeros((self.max_nodes, 2), dtype=np.float32)
+        node_features = np.zeros((self.max_nodes, 1), dtype=np.float32)
         node_features[: self.graph.num_nodes, 0] = self.in_mis[: self.graph.num_nodes]
-        node_features[: self.graph.num_nodes, 1] = self.mis_neighbourhood[: self.graph.num_nodes]
 
         adjacency_matrix = (
             to_dense_adj(self.graph.edge_index, max_num_nodes=self.max_nodes)
