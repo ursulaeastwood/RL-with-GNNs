@@ -358,13 +358,6 @@ class MISEnv(gym.Env):
                     shape=(self.max_nodes, 2),
                     dtype=np.float32,
                 ),
-                # edge features: ? 
-                "edge_features": gym.spaces.Box(
-                    low=0,
-                    high=1,
-                    shape=(self.max_nodes, self.max_nodes, 1),
-                    dtype=np.float32,
-                ),
                 "adjacency_matrix": gym.spaces.Box(
                     low=0,
                     high=1,
@@ -450,21 +443,6 @@ class MISEnv(gym.Env):
         node_features[: self.graph.num_nodes, 0] = self.in_mis[: self.graph.num_nodes]
         node_features[: self.graph.num_nodes, 1] = self.mis_neighbourhood[: self.graph.num_nodes]
 
-        edge_features = np.zeros((self.max_nodes, self.max_nodes, 1), dtype=np.float32)
-
-        edge_index = self.graph.edge_index.numpy()
-        for i in range(edge_index.shape[1]):
-            u = edge_index[0, i]
-            v = edge_index[1, i]
-            if (
-                self.in_mis[u] == 1
-                or self.in_mis[v] == 1
-                or self.mis_neighbourhood[u] == 1
-                or self.mis_neighbourhood[v] == 1
-            ):
-                edge_features[u, v, 0] = 1.0
-                edge_features[v, u, 0] = 1.0
-
         adjacency_matrix = (
             to_dense_adj(self.graph.edge_index, max_num_nodes=self.max_nodes)
             .squeeze(0)
@@ -473,7 +451,6 @@ class MISEnv(gym.Env):
 
         return {
             "node_features": node_features,
-            "edge_features": edge_features,
             "adjacency_matrix": adjacency_matrix,
         }
     def _compute_mis_size(self):

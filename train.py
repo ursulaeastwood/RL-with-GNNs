@@ -97,7 +97,7 @@ def parse_args():
 
 def main():
     config = {
-        "env": "MVCEnv-v0",
+        "env": "MISEnv-v0",
         "seed": 42,
         "n_val_episodes": 20,
         "val_freq": 1024,

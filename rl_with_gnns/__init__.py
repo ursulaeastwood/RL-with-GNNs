@@ -9,3 +9,8 @@ register(
     id="MVCEnv-v0",
     entry_point="rl_with_gnns.env:MVCEnv",
 )
+
+register(
+    id="MISEnv-v0",
+    entry_point="rl_with_gnns.env:MISEnv"
+)
