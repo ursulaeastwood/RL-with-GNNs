@@ -327,7 +327,7 @@ class MVCEnv(gym.Env):
 class MISEnv(gym.Env):
     def __init__(self, split: str, seed: int):
         if split not in ["train", "val", "test"]:
-            raise ValueError("split must be one of 'train', 'val', or 'test")
+            raise ValueError("split must be one of 'train', 'val', or 'test'")
         
         super(MISEnv, self).__init__()
 
@@ -351,11 +351,12 @@ class MISEnv(gym.Env):
         self.action_space = gym.spaces.Discrete(self.max_nodes)
         self.observation_space = gym.spaces.Dict(
             {
-                # node features: is node in mis
+                # node features: one-hot encoding of MIS membership
+                # [1,0] is not is in MIS, [0,1] otherwise
                 "node_features": gym.spaces.Box(
                     low=0,
                     high=1,
-                    shape=(self.max_nodes, 1),
+                    shape=(self.max_nodes, 2),
                     dtype=np.float32,
                 ),
                 "adjacency_matrix": gym.spaces.Box(
@@ -366,7 +367,6 @@ class MISEnv(gym.Env):
                 ),
             }
         )
-
 
     def reset(self, seed=None, options=None):
         self.graph = self.graphs[self.current_graph_index]
@@ -386,8 +386,8 @@ class MISEnv(gym.Env):
         return self._get_observation(), {}
 
     def step(self, action):
-
         # penalty for re-adding a node or for adding a forbidden node
+        # TODO(normalize this)
         if self.in_mis[action] == 1 or self.mis_neighbourhood[action] == 1:
             reward = -1.0
             return self._get_observation(), reward, False, False, {}
@@ -404,7 +404,7 @@ class MISEnv(gym.Env):
         done = self._all_nodes_in_neighbourhood()
 
         if done:
-            reward = self._compute_mis_size()
+            reward = self._compute_normed_mis_size() 
 
         return self._get_observation(), reward, done, False, {}
 
@@ -432,15 +432,19 @@ class MISEnv(gym.Env):
         for _ in range(self.num_graphs):
             graphs.append(self._sample_graph())
         return graphs
-    
 
     def _all_nodes_in_neighbourhood(self) -> bool:
         return np.all(self.mis_neighbourhood[: self.graph.num_nodes] == 1)
-        # return (self.mis_neighbourhood.sum() == self.graph.num_nodes)
-    
+
     def _get_observation(self):
-        node_features = np.zeros((self.max_nodes, 1), dtype=np.float32)
+        node_features = np.zeros((self.max_nodes, 2), dtype=np.float32)
+
+        # Default: not in MIS -> [0, 1]
+        node_features[:, 1] = 1.0
+
+        # if node is in mis, set to [1,0]
         node_features[: self.graph.num_nodes, 0] = self.in_mis[: self.graph.num_nodes]
+        node_features[: self.graph.num_nodes, 1] = 1.0 - self.in_mis[: self.graph.num_nodes]
 
         adjacency_matrix = (
             to_dense_adj(self.graph.edge_index, max_num_nodes=self.max_nodes)
@@ -452,5 +456,6 @@ class MISEnv(gym.Env):
             "node_features": node_features,
             "adjacency_matrix": adjacency_matrix,
         }
-    def _compute_mis_size(self):
-        return self.in_mis[: self.graph.num_nodes].sum()
+
+    def _compute_normed_mis_size(self):
+        return self.in_mis[: self.graph.num_nodes].sum() / self.graph.num_nodes
