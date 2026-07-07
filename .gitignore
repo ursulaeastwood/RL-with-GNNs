@@ -75,3 +75,10 @@ Thumbs.db
 data/
 models/
 runs/
+
+archived/
+notebooks/
+logs/
+models/
+generated/
+runs/
