@@ -1,6 +1,5 @@
 import torch as th
 from torch_geometric.data import Data, Batch
-import numpy as np
 import inspect
 import warnings
 from stable_baselines3.common.vec_env.base_vec_env import VecEnv
