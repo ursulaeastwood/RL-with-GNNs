@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import numpy as np
 import torch as th
-import time
 import gymnasium as gym
+import yaml
+import argparse
 
+from torch.nn.parameter import UninitializedParameter
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback
 from sb3_contrib.common.maskable.evaluation import evaluate_policy
@@ -12,10 +14,14 @@ from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor, VecEnv
 from rl_with_gnns.policy import MaskableGraphActorCriticPolicy
 from rl_with_gnns.util import get_clean_kwargs, change_obs_action_space
 from rl_with_gnns.env import VariableTimeLimit
-import argparse
 
 
-def train_ppo(train_env: VecEnv, val_env: VecEnv, config: dict, run_id: int):
+def load_config(path: str) -> dict:
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def train_ppo(train_env: VecEnv, val_env: VecEnv, config: dict, run_id: str):
     ppo_kwargs = get_clean_kwargs(
         MaskablePPO.__init__,
         warn=False,
@@ -53,7 +59,8 @@ def train_ppo(train_env: VecEnv, val_env: VecEnv, config: dict, run_id: int):
 
 def evaluate(run_id, test_env: VecEnv, config: dict):
     # Load the best model
-    model = MaskablePPO.load(f"models/{run_id}/best_model.zip")
+    with th.serialization.safe_globals([UninitializedParameter]):
+        model = MaskablePPO.load(f"models/{run_id}/best_model.zip")
 
     # Update the action/observation spaces of the model to match the eval env
     model.policy = change_obs_action_space(model.policy, test_env)
@@ -79,56 +86,28 @@ def parse_args():
         description="Train and evaluate PPO with GNN policy."
     )
     parser.add_argument(
-        "--seed", type=int, default=42, help="Random seed for reproducibility."
+        "--config",  required=True, help="Path to experiment YAML"
     )
     parser.add_argument(
-        "--architecture",
-        type=str,
-        default="GAT",
-        help="Type of GNN architecture to use.",
+        "--seed", type=int, required=True, help="Random seed."
     )
-    parser.add_argument(
-        "--penalty",
-        action="store_true",
-        help="Use penalties instead of action masking.",
-    )
+
     return parser.parse_args()
 
 
 def main():
-    config = {
-        "env": "MISEnv-v0",
-        "seed": 42,
-        "n_val_episodes": 20,
-        "val_freq": 1024,
-        "num_envs": 1,
-        "policy_kwargs": {
-            "pooling_type": "mean",
-            "embed_dim": 128,
-            "network_kwargs": {"network": "GAT", "num_layers": 2},
-        },
-        "PPO": {
-            "timesteps": 100000,
-            "seed": 42,
-            "learning_rate": 1e-5,
-            "gamma": 1,
-            "n_steps": 1024,
-        },
-        "eval_seed": 1,
-        "n_eval_episodes": 100,
-        "use_masking": True,
-    }
-
     args = parse_args()
+    config = load_config(args.config)
+
+    # override the seeds the config
     config["seed"] = args.seed
     config["PPO"]["seed"] = args.seed
-    config["policy_kwargs"]["network_kwargs"]["network"] = args.architecture
-    config["use_masking"] = not args.penalty
-
-    run_id = int(time.time())
 
     th.manual_seed(config["seed"])
     np.random.seed(config["seed"])
+
+    run_id = f"{config['experiment']['id']}/seed{config['seed']}"
+
 
     def make_env(split, idx):
         def _init():

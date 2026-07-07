@@ -1,0 +1,24 @@
+# Seeds to repeat every experiment with
+seeds:
+  - 1
+  - 2
+
+# Cartesian product of these values defines the experiments
+parameters:
+  PPO.timesteps:
+    - 1000
+
+  PPO.learning_rate:
+    - 1.0e-5
+
+  PPO.n_steps:
+    - 1024
+
+  policy_kwargs.embed_dim:
+    - 64
+
+  policy_kwargs.network_kwargs.network:
+    - GAT
+
+  policy_kwargs.network_kwargs.num_layers:
+    - 2
